@@ -83,7 +83,7 @@ fun AssistantScreen(
             ) {
                 Column {
                     Text(
-                        text = "MAYERA VOICE ASSISTANT",
+                        text = "Mayera (মায়েরা)",
                         color = MaterialTheme.colorScheme.primary,
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Bold,

@@ -15,10 +15,42 @@ import retrofit2.http.Query
 import java.util.concurrent.TimeUnit
 
 @JsonClass(generateAdapter = true)
+data class Tool(
+    @Json(name = "functionDeclarations") val functionDeclarations: List<FunctionDeclaration>
+)
+
+@JsonClass(generateAdapter = true)
+data class FunctionDeclaration(
+    @Json(name = "name") val name: String,
+    @Json(name = "description") val description: String,
+    @Json(name = "parameters") val parameters: FunctionParameters? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class FunctionParameters(
+    @Json(name = "type") val type: String = "OBJECT",
+    @Json(name = "properties") val properties: Map<String, FunctionProperty>? = null,
+    @Json(name = "required") val required: List<String>? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class FunctionProperty(
+    @Json(name = "type") val type: String,
+    @Json(name = "description") val description: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class FunctionCall(
+    @Json(name = "name") val name: String,
+    @Json(name = "args") val args: Map<String, String>? = null
+)
+
+@JsonClass(generateAdapter = true)
 data class GenerateContentRequest(
     @Json(name = "contents") val contents: List<Content>,
     @Json(name = "generationConfig") val generationConfig: GenerationConfig? = null,
-    @Json(name = "systemInstruction") val systemInstruction: Content? = null
+    @Json(name = "systemInstruction") val systemInstruction: Content? = null,
+    @Json(name = "tools") val tools: List<Tool>? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -28,7 +60,8 @@ data class Content(
 
 @JsonClass(generateAdapter = true)
 data class Part(
-    @Json(name = "text") val text: String? = null
+    @Json(name = "text") val text: String? = null,
+    @Json(name = "functionCall") val functionCall: FunctionCall? = null
 )
 
 @JsonClass(generateAdapter = true)

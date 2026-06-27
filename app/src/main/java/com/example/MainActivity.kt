@@ -91,7 +91,16 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MyApplicationTheme {
-                MainContentScreen(viewModel = viewModel)
+                val isApiKeyMissing by viewModel.isApiKeyMissingFlow.collectAsState()
+                if (isApiKeyMissing) {
+                    ActivationScreen(
+                        onActivationSuccess = {
+                            viewModel.refreshApiKeyStatus()
+                        }
+                    )
+                } else {
+                    MainContentScreen(viewModel = viewModel)
+                }
             }
         }
     }

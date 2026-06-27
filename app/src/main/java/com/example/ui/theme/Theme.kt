@@ -12,33 +12,33 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme = darkColorScheme(
-    primary = EspressoPrimary,
-    secondary = EspressoSecondary,
+    primary = NeonCyan,
+    secondary = ElectricIndigo,
     tertiary = AquaGreen,
-    background = EspressoBg,
-    surface = EspressoSurface,
-    onPrimary = CharcoalText,
-    onSecondary = CharcoalText,
-    onTertiary = CharcoalText,
-    onBackground = LatteText,
-    onSurface = LatteText,
-    surfaceVariant = EspressoSurface,
-    onSurfaceVariant = LatteText
+    background = Color.Black,
+    surface = SpaceBlue,
+    onPrimary = Color.Black,
+    onSecondary = Color.White,
+    onTertiary = Color.White,
+    onBackground = Color.White,
+    onSurface = Color.White,
+    surfaceVariant = SpaceBlue,
+    onSurfaceVariant = Color.White
 )
 
 private val LightColorScheme = lightColorScheme(
-    primary = CreamPrimary,
-    secondary = CreamSecondary,
+    primary = NeonCyan,
+    secondary = ElectricIndigo,
     tertiary = AquaGreen,
-    background = CreamBg,
-    surface = CreamSurface,
-    onPrimary = Color.White,
+    background = Color.Black,
+    surface = SpaceBlue,
+    onPrimary = Color.Black,
     onSecondary = Color.White,
     onTertiary = Color.White,
-    onBackground = CharcoalText,
-    onSurface = CharcoalText,
-    surfaceVariant = SoftCreamVariant,
-    onSurfaceVariant = CharcoalText
+    onBackground = Color.White,
+    onSurface = Color.White,
+    surfaceVariant = SpaceBlue,
+    onSurfaceVariant = Color.White
 )
 
 @Composable

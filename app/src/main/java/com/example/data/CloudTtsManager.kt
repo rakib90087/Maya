@@ -86,23 +86,67 @@ class CloudTtsManager(private val context: Context) : TextToSpeech.OnInitListene
         stopSpeaking()
 
         currentPlayJob = mainScope.launch {
-            val apiKey = ApiKeyManager.getApiKey(context)
-            if (apiKey.isBlank() || apiKey == "null") {
-                Log.w("CloudTtsManager", "API Key is missing or invalid. Falling back to Local TTS.")
-                speakLocal(text)
-                return@launch
+            onStart()
+
+            // Try ElevenLabs TTS first
+            Log.d("CloudTtsManager", "Attempting ElevenLabs TTS...")
+            var audioBytes = tryElevenLabsTts(text)
+            
+            if (audioBytes == null) {
+                // Try Google Cloud TTS if ElevenLabs fails
+                val apiKey = ApiKeyManager.getApiKey(context)
+                if (apiKey.isNotBlank() && apiKey != "null") {
+                    Log.d("CloudTtsManager", "ElevenLabs failed. Attempting Google Cloud TTS...")
+                    audioBytes = tryCloudTts(text, apiKey)
+                }
             }
 
-            onStart()
-            
-            // Try Cloud TTS
-            val audioBytes = tryCloudTts(text, apiKey)
             if (audioBytes != null) {
                 playAudioBytes(audioBytes, onComplete)
             } else {
-                Log.e("CloudTtsManager", "Cloud TTS synthesis failed. Falling back to Local TTS.")
+                Log.e("CloudTtsManager", "Both ElevenLabs and Cloud TTS synthesis failed/unavailable. Falling back to Local TTS.")
                 speakLocal(text)
             }
+        }
+    }
+
+    private suspend fun tryElevenLabsTts(text: String): ByteArray? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val apiKey = "151cfa936d31bf51e54306d7a76336d951027503cc25760c904b1d79512be5ca"
+                val voiceId = "21m00Tcm4TlvDq8ikWAM"
+                val url = "https://api.elevenlabs.io/v1/text-to-speech/$voiceId"
+
+                val json = JSONObject().apply {
+                    put("text", text)
+                    put("model_id", "eleven_multilingual_v2")
+                    put("voice_settings", JSONObject().apply {
+                        put("stability", 0.5)
+                        put("similarity_boost", 0.75)
+                    })
+                }
+
+                val mediaType = "application/json; charset=utf-8".toMediaType()
+                val body = json.toString().toRequestBody(mediaType)
+
+                val request = Request.Builder()
+                    .url(url)
+                    .addHeader("xi-api-key", apiKey)
+                    .post(body)
+                    .build()
+
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        Log.d("CloudTtsManager", "ElevenLabs TTS synthesis succeeded.")
+                        return@withContext response.body?.bytes()
+                    } else {
+                        Log.e("CloudTtsManager", "ElevenLabs TTS returned error code: ${response.code}")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("CloudTtsManager", "Exception during ElevenLabs TTS call", e)
+            }
+            null
         }
     }
 

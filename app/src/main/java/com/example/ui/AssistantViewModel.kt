@@ -136,9 +136,16 @@ class AssistantViewModel(
         _partialSpeechText.value = text
     }
 
+    private val _isApiKeyMissingFlow = kotlinx.coroutines.flow.MutableStateFlow(!ApiKeyManager.isApiKeyConfigured(getApplication()))
+    val isApiKeyMissingFlow: kotlinx.coroutines.flow.StateFlow<Boolean> = _isApiKeyMissingFlow.asStateFlow()
+
+    fun refreshApiKeyStatus() {
+        _isApiKeyMissingFlow.value = !ApiKeyManager.isApiKeyConfigured(getApplication())
+    }
+
     // Is API key missing or default placeholder?
     val isApiKeyMissing: Boolean
-        get() = !ApiKeyManager.isApiKeyConfigured(getApplication())
+        get() = _isApiKeyMissingFlow.value
 
     init {
         // Fetch location at startup
@@ -314,6 +321,17 @@ class AssistantViewModel(
                     2. User Title: You MUST strictly address the user as "Boss" (বস) in EVERY response and in EVERY sentence you speak or write. Never call the user by name or any generic/informal title.
                     3. Tone & Personality: Maintain an extremely respectful, loyal, devoted, and supportive female AI persona. Your Bengali must be smooth, polite, natural, and affectionate yet highly professional.
                     
+                    CRITICAL APP LAUNCHING RULES:
+                    - You are capable of helping the user open ANY application installed on their mobile device.
+                    - When the user asks to open an app (regardless of the language used—English, Bengali, or mixed), you MUST NOT reply with conversational text. Instead, you must trigger the function call named `openApp` with the exact name of the requested application as the argument.
+                    - Do NOT speak or return any conversational reply when launching an app. Just trigger the function call.
+                    - Extrapolate the app name from any user input dynamically. The app name can be absolutely anything (e.g., Telegram, PubG, Instagram, Whatsapp, Gmail, Settings, or any local app).
+                    - Examples for training:
+                      - User: "হোয়াটসঅ্যাপ খোল" -> call `openApp` with appName = "whatsapp"
+                      - User: "Open Spotify" -> call `openApp` with appName = "spotify"
+                      - User: "ফাইল ম্যানেজার অন করো" -> call `openApp` with appName = "files"
+                      - User: "Open settings" -> call `openApp` with appName = "settings"
+                    
                     Keep your answers extremely concise, fast, and action-oriented. Do not use unnecessary filler words.
                     
                     You have full system permissions and can automate tasks on the user's phone directly using command triggers.
@@ -355,14 +373,35 @@ class AssistantViewModel(
                     Content(parts = listOf(Part(text = msg.text)))
                 }
 
+                val openAppTool = Tool(
+                    functionDeclarations = listOf(
+                        FunctionDeclaration(
+                            name = "openApp",
+                            description = "Dynamically searches and opens the requested mobile application.",
+                            parameters = FunctionParameters(
+                                type = "OBJECT",
+                                properties = mapOf(
+                                    "appName" to FunctionProperty(
+                                        type = "STRING",
+                                        description = "The exact name of the requested application"
+                                    )
+                                ),
+                                required = listOf("appName")
+                            )
+                        )
+                    )
+                )
+
                 val request = GenerateContentRequest(
                     contents = contents,
                     systemInstruction = Content(parts = listOf(Part(text = systemInstructionText))),
-                    generationConfig = GenerationConfig(temperature = 0.5f)
+                    generationConfig = GenerationConfig(temperature = 0.5f),
+                    tools = listOf(openAppTool)
                 )
 
                 val apiKey = ApiKeyManager.getApiKey(getApplication())
                 var fullStreamedText = ""
+                val fullResponse = java.lang.StringBuilder()
                 
                 withContext(Dispatchers.IO) {
                     val responseBody = RetrofitClient.service.generateContentStream(
@@ -377,6 +416,7 @@ class AssistantViewModel(
                         
                         while (reader.readLine().also { line = it } != null) {
                             val currentLine = line ?: continue
+                            fullResponse.append(currentLine).append("\n")
                             val matchResults = textRegex.findAll(currentLine)
                             for (match in matchResults) {
                                 val escapedText = match.groups[1]?.value ?: continue
@@ -407,91 +447,113 @@ class AssistantViewModel(
                     }
                 }
 
-                // Parse and execute final commands
-                var cleanAiText = fullStreamedText.trim()
-                if (cleanAiText.startsWith("[")) {
-                    val endIndex = cleanAiText.indexOf("]")
-                    if (endIndex != -1) {
-                        val commandTag = cleanAiText.substring(1, endIndex)
-                        cleanAiText = cleanAiText.substring(endIndex + 1).trim()
-                        
-                        try {
-                            val colonIndex = commandTag.indexOf(":")
-                            if (colonIndex != -1) {
-                                val cmdType = commandTag.substring(0, colonIndex).trim().uppercase()
-                                val cmdArgs = commandTag.substring(colonIndex + 1).trim()
-                                
-                                when (cmdType) {
-                                    "CALL" -> {
-                                        phoneManager.makeCall(cmdArgs)
-                                    }
-                                    "SMS" -> {
-                                        val parts = cmdArgs.split("|").map { it.trim() }
-                                        val number = parts.getOrNull(0) ?: ""
-                                        val msg = parts.getOrNull(1) ?: ""
-                                        if (number.isNotEmpty()) {
-                                            phoneManager.sendSMS(number, msg)
-                                        }
-                                    }
-                                    "WHATSAPP" -> {
-                                        val parts = cmdArgs.split("|").map { it.trim() }
-                                        val number = parts.getOrNull(0) ?: ""
-                                        val msg = parts.getOrNull(1) ?: ""
-                                        if (number.isNotEmpty()) {
-                                            phoneManager.sendWhatsAppMessage(number, msg)
-                                        }
-                                    }
-                                    "LAUNCH_APP" -> {
-                                        phoneManager.launchApp(cmdArgs)
-                                    }
-                                    "FLASHLIGHT" -> {
-                                        val turnOn = cmdArgs.equals("ON", ignoreCase = true)
-                                        phoneManager.toggleFlashlight(turnOn)
-                                    }
-                                    "ADD_TASK" -> {
-                                        val parts = cmdArgs.split("|").map { it.trim() }
-                                        val title = parts.getOrNull(0) ?: "New Task"
-                                        val category = parts.getOrNull(1) ?: "Personal"
-                                        val description = parts.getOrNull(2) ?: ""
-                                        val steps = "• Step 1: Initial preparation\n• Step 2: Core action items\n• Step 3: Complete & verify"
-                                        repository.insert(
-                                            Task(
-                                                title = title,
-                                                category = category,
-                                                description = description,
-                                                suggestedSteps = steps
-                                            )
-                                        )
-                                    }
-                                }
-                            } else {
-                                when (commandTag.uppercase()) {
-                                    "GO_HOME" -> phoneManager.goHome()
-                                    "SCREEN_RECORDER" -> phoneManager.openScreenRecorder()
-                                }
+                var hasExecutedFunctionCall = false
+                val rawResponseStr = fullResponse.toString()
+                if (rawResponseStr.contains("functionCall")) {
+                    val appNameRegex = """"appName"\s*:\s*"([^"]+)"""".toRegex()
+                    val matchResult = appNameRegex.find(rawResponseStr)
+                    val appName = matchResult?.groups?.get(1)?.value
+                    
+                    if (!appName.isNullOrBlank()) {
+                        hasExecutedFunctionCall = true
+                        withContext(Dispatchers.Main) {
+                            phoneManager.launchApp(appName)
+                            val currentList = _chatMessages.value.toMutableList()
+                            if (aiMessageIndex < currentList.size) {
+                                currentList[aiMessageIndex] = ChatMessage(text = "Opening $appName...", isUser = false)
+                                _chatMessages.value = currentList
                             }
-                        } catch (e: Exception) {
-                            Log.e("AssistantViewModel", "Failed to parse command: $commandTag", e)
                         }
                     }
                 }
 
-                if (cleanAiText.isEmpty()) {
-                    cleanAiText = "কাজটি সম্পন্ন করা হয়েছে।"
-                }
-
-                // Final UI Update with parsed clean text
-                val finalCleanText = cleanAiText
-                withContext(Dispatchers.Main) {
-                    val currentList = _chatMessages.value.toMutableList()
-                    if (aiMessageIndex < currentList.size) {
-                        currentList[aiMessageIndex] = ChatMessage(text = finalCleanText, isUser = false)
-                        _chatMessages.value = currentList
+                if (!hasExecutedFunctionCall) {
+                    // Parse and execute final commands
+                    var cleanAiText = fullStreamedText.trim()
+                    if (cleanAiText.startsWith("[")) {
+                        val endIndex = cleanAiText.indexOf("]")
+                        if (endIndex != -1) {
+                            val commandTag = cleanAiText.substring(1, endIndex)
+                            cleanAiText = cleanAiText.substring(endIndex + 1).trim()
+                            
+                            try {
+                                val colonIndex = commandTag.indexOf(":")
+                                if (colonIndex != -1) {
+                                    val cmdType = commandTag.substring(0, colonIndex).trim().uppercase()
+                                    val cmdArgs = commandTag.substring(colonIndex + 1).trim()
+                                    
+                                    when (cmdType) {
+                                        "CALL" -> {
+                                            phoneManager.makeCall(cmdArgs)
+                                        }
+                                        "SMS" -> {
+                                            val parts = cmdArgs.split("|").map { it.trim() }
+                                            val number = parts.getOrNull(0) ?: ""
+                                            val msg = parts.getOrNull(1) ?: ""
+                                            if (number.isNotEmpty()) {
+                                                phoneManager.sendSMS(number, msg)
+                                            }
+                                        }
+                                        "WHATSAPP" -> {
+                                            val parts = cmdArgs.split("|").map { it.trim() }
+                                            val number = parts.getOrNull(0) ?: ""
+                                            val msg = parts.getOrNull(1) ?: ""
+                                            if (number.isNotEmpty()) {
+                                                phoneManager.sendWhatsAppMessage(number, msg)
+                                            }
+                                        }
+                                        "LAUNCH_APP" -> {
+                                            phoneManager.launchApp(cmdArgs)
+                                        }
+                                        "FLASHLIGHT" -> {
+                                            val turnOn = cmdArgs.equals("ON", ignoreCase = true)
+                                            phoneManager.toggleFlashlight(turnOn)
+                                        }
+                                        "ADD_TASK" -> {
+                                            val parts = cmdArgs.split("|").map { it.trim() }
+                                            val title = parts.getOrNull(0) ?: "New Task"
+                                            val category = parts.getOrNull(1) ?: "Personal"
+                                            val description = parts.getOrNull(2) ?: ""
+                                            val steps = "• Step 1: Initial preparation\n• Step 2: Core action items\n• Step 3: Complete & verify"
+                                            repository.insert(
+                                                Task(
+                                                    title = title,
+                                                    category = category,
+                                                    description = description,
+                                                    suggestedSteps = steps
+                                                )
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    when (commandTag.uppercase()) {
+                                        "GO_HOME" -> phoneManager.goHome()
+                                        "SCREEN_RECORDER" -> phoneManager.openScreenRecorder()
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                Log.e("AssistantViewModel", "Failed to parse command: $commandTag", e)
+                            }
+                        }
                     }
-                }
 
-                // 5. Trigger TTS speech of the clean confirmation
-                speakCallback?.invoke(finalCleanText)
+                    if (cleanAiText.isEmpty()) {
+                        cleanAiText = "কাজটি সম্পন্ন করা হয়েছে।"
+                    }
+
+                    // Final UI Update with parsed clean text
+                    val finalCleanText = cleanAiText
+                    withContext(Dispatchers.Main) {
+                        val currentList = _chatMessages.value.toMutableList()
+                        if (aiMessageIndex < currentList.size) {
+                            currentList[aiMessageIndex] = ChatMessage(text = finalCleanText, isUser = false)
+                            _chatMessages.value = currentList
+                        }
+                    }
+
+                    // 5. Trigger TTS speech of the clean confirmation
+                    speakCallback?.invoke(finalCleanText)
+                }
 
             } catch (e: Exception) {
                 Log.e("AssistantViewModel", "Error communicating with Gemini API", e)
