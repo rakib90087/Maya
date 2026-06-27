@@ -175,7 +175,7 @@ fun TasksScreen(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Ask Maya to add some, or use the '+' button!",
+                            text = "Ask Mayera to add some, or use the '+' button!",
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                             fontSize = 13.sp
                         )

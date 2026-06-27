@@ -57,13 +57,13 @@ import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import java.util.Locale
 
-class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
+class MainActivity : ComponentActivity() {
 
     private lateinit var db: AppDatabase
     private lateinit var repository: TaskRepository
     private lateinit var phoneManager: PhoneFeatureManager
     private lateinit var voiceManager: VoiceManager
-    private var tts: TextToSpeech? = null
+    private lateinit var cloudTts: CloudTtsManager
 
     private lateinit var viewModel: AssistantViewModel
 
@@ -80,7 +80,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         voiceManager = VoiceManager(this)
 
         // 3. Init TTS
-        tts = TextToSpeech(this, this)
+        cloudTts = CloudTtsManager(this)
 
         // 4. Init ViewModel with Custom Factory
         val factory = AssistantViewModelFactory(application, repository, phoneManager)
@@ -162,78 +162,12 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
         // VM trigger -> Text to Speech
         viewModel.speakCallback = { text ->
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "MayaSpeechId")
-            viewModel.setSpeaking(true)
-        }
-        viewModel.stopSpeakingCallback = {
-            tts?.stop()
-        }
-    }
-
-    override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            // Set language to Bengali for fluent Bengali text-to-speech
-            val bengaliLocale = Locale("bn", "BD")
-            var result = tts?.setLanguage(bengaliLocale)
-            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                result = tts?.setLanguage(Locale("bn"))
-                if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    Log.e("TTS", "Bengali language is not supported or missing data. Falling back to default.")
-                    tts?.setLanguage(Locale.getDefault())
-                }
-            }
-
-            // Configure natural, high-quality voice parameters for Maya (Bengali female voice)
-            try {
-                val availableVoices = tts?.voices
-                if (!availableVoices.isNullOrEmpty()) {
-                    var selectedVoice: android.speech.tts.Voice? = null
-                    
-                    // 1. Try to find an explicit female Bengali voice first
-                    for (voice in availableVoices) {
-                        val isBengali = voice.locale?.language?.lowercase(Locale.ROOT) == "bn"
-                        if (isBengali) {
-                            val name = voice.name?.lowercase(Locale.ROOT) ?: ""
-                            if (name.contains("female") || name.contains("fem") || name.contains("-f-")) {
-                                selectedVoice = voice
-                                Log.d("TTS", "Selected premium female Bengali voice: ${voice.name}")
-                                break
-                            }
-                        }
-                    }
-                    
-                    // 2. Fallback to any Bengali voice if no explicit female voice was found
-                    if (selectedVoice == null) {
-                        for (voice in availableVoices) {
-                            val isBengali = voice.locale?.language?.lowercase(Locale.ROOT) == "bn"
-                            if (isBengali) {
-                                selectedVoice = voice
-                                Log.d("TTS", "Selected fallback Bengali voice: ${voice.name}")
-                                break
-                            }
-                        }
-                    }
-                    
-                    // 3. Set the voice
-                    if (selectedVoice != null) {
-                        tts?.voice = selectedVoice
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("TTS", "Error selecting custom female voice programmatically", e)
-            }
-
-            // Adjust pitch and speech rate to sound like a natural, friendly human named Maya
-            tts?.setPitch(1.08f)       // Warm, pleasant feminine pitch (slightly higher than robotic default)
-            tts?.setSpeechRate(0.92f)  // Slightly relaxed rate for natural cadence, clarity, and warmth
-
-            // Hook up speaking state updates
-            tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) {
+            cloudTts.speak(
+                text = text,
+                onStart = {
                     viewModel.setSpeaking(true)
-                }
-
-                override fun onDone(utteranceId: String?) {
+                },
+                onComplete = {
                     viewModel.setSpeaking(false)
                     // Resume passive listening once speaking finishes
                     runOnUiThread {
@@ -242,38 +176,29 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                         }
                     }
                 }
-
-                @Deprecated("Deprecated in Java")
-                override fun onError(utteranceId: String?) {
-                    viewModel.setSpeaking(false)
-                    // Resume passive listening even if speech errored
-                    runOnUiThread {
-                        if (viewModel.wakeWordModeEnabled.value) {
-                            viewModel.startPassiveListening()
-                        }
-                    }
-                }
-            })
-        } else {
-            Log.e("TTS", "Initialization failed!")
+            )
+        }
+        viewModel.stopSpeakingCallback = {
+            cloudTts.stopSpeaking()
+            viewModel.setSpeaking(false)
         }
     }
 
     override fun onResume() {
         super.onResume()
         viewModel.checkNotificationAccess()
+        viewModel.checkOverlayPermission(this)
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        tts?.stop()
-        tts?.shutdown()
+        cloudTts.destroy()
         voiceManager.destroy()
     }
 }
 
 enum class NavigationTab(val route: String, val title: String, val icon: ImageVector) {
-    ASSISTANT("assistant", "Maya Chat", Icons.Default.ChatBubble),
+    ASSISTANT("assistant", "Mayera Chat", Icons.Default.ChatBubble),
     TASKS("tasks", "Tasks", Icons.Default.Assignment),
     TELEMETRY("telemetry", "Sensors", Icons.Default.Assessment)
 }
@@ -294,6 +219,9 @@ fun MainContentScreen(viewModel: AssistantViewModel) {
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             list.add(Manifest.permission.ANSWER_PHONE_CALLS)
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            list.add(Manifest.permission.POST_NOTIFICATIONS)
         }
         list
     }
@@ -444,7 +372,7 @@ fun VoiceOverlay(partialText: String) {
             verticalArrangement = Arrangement.Center
         ) {
             Text(
-                text = "Maya Voice Sensor",
+                text = "Mayera Voice Sensor",
                 color = SunsetRed,
                 fontWeight = FontWeight.Bold,
                 fontSize = 12.sp,

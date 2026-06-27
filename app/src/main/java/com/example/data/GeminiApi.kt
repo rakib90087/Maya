@@ -56,6 +56,14 @@ interface GeminiApiService {
         @Query("key") apiKey: String,
         @Body request: GenerateContentRequest
     ): GenerateContentResponse
+
+    @POST("v1beta/models/{model}:streamGenerateContent")
+    @retrofit2.http.Streaming
+    suspend fun generateContentStream(
+        @Path("model") model: String,
+        @Query("key") apiKey: String,
+        @Body request: GenerateContentRequest
+    ): okhttp3.ResponseBody
 }
 
 object RetrofitClient {

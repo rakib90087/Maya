@@ -1,5 +1,8 @@
 package com.example.ui
 
+import android.content.Intent
+import android.provider.Settings
+import android.os.Build
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
@@ -80,7 +83,7 @@ fun AssistantScreen(
             ) {
                 Column {
                     Text(
-                        text = "MAYA VOICE ASSISTANT",
+                        text = "MAYERA VOICE ASSISTANT",
                         color = MaterialTheme.colorScheme.primary,
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Bold,
@@ -88,7 +91,7 @@ fun AssistantScreen(
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         val statusColor = if (isGenerating) AmberGold else if (isListening) SunsetRed else if (isPassiveListening) MaterialTheme.colorScheme.secondary else AquaGreen
-                        val statusText = if (isGenerating) "Maya is thinking..." else if (isListening) "Listening to you..." else if (isPassiveListening) "Waiting for 'Maya'..." else "Maya stands ready"
+                        val statusText = if (isGenerating) "Mayera is thinking..." else if (isListening) "Listening to you..." else if (isPassiveListening) "Waiting for 'Mayera'..." else "Mayera stands ready"
                         
                         Box(
                             modifier = Modifier
@@ -124,6 +127,8 @@ fun AssistantScreen(
 
             // Notification access warning panel
             val isNotificationAccessGranted by viewModel.isNotificationAccessGranted.collectAsState()
+            val isOverlayPermissionGranted by viewModel.isOverlayPermissionGranted.collectAsState()
+            val isBackgroundServiceRunning by viewModel.isBackgroundServiceRunning.collectAsState()
             val context = LocalContext.current
             
             if (!isNotificationAccessGranted) {
@@ -166,6 +171,128 @@ fun AssistantScreen(
                 }
             }
 
+            // Always-on Overlay permission / Service controller card
+            if (!isOverlayPermissionGranted) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp)
+                        .clickable {
+                            try {
+                                val intent = Intent(
+                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                    android.net.Uri.parse("package:${context.packageName}")
+                                )
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+                                context.startActivity(intent)
+                            }
+                        }
+                        .border(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Layers,
+                            contentDescription = "Overlay permission",
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "ভাসমান বাবল অ্যাসিস্ট্যান্ট চালু করুন",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                            Text(
+                                text = "অন্য অ্যাপের উপরে ড্র্যাগযোগ্য ভাসমান সহকারী ব্যবহার করতে এখানে ট্যাপ করে 'Display over other apps' পারমিশন দিন।",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+            } else {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isBackgroundServiceRunning) 
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) 
+                        else 
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp)
+                        .border(
+                            1.dp, 
+                            if (isBackgroundServiceRunning) MaterialTheme.colorScheme.primary.copy(0.3f) else MaterialTheme.colorScheme.surfaceVariant.copy(0.5f), 
+                            RoundedCornerShape(12.dp)
+                        )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = if (isBackgroundServiceRunning) Icons.Default.CircleNotifications else Icons.Default.NotificationsNone,
+                            contentDescription = "Background Service Status",
+                            tint = if (isBackgroundServiceRunning) SunsetRed else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "সবসময় সচল ভাসমান অ্যাসিস্ট্যান্ট",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = if (isBackgroundServiceRunning) SunsetRed else MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (isBackgroundServiceRunning) 
+                                    "মায়েরা অ্যাসিস্ট্যান্ট বাবল সচল এবং ব্যাকগ্রাউন্ডে রেডি আছে।" 
+                                else 
+                                    "অন্য যেকোনো অ্যাপ ব্যবহারের সময় মায়েরা বাবল এবং ভয়েস কল ডিটেকশন সক্রিয় করতে এটি অন করুন।",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = isBackgroundServiceRunning,
+                            onCheckedChange = { startService ->
+                                val intent = Intent(context, com.example.data.MayeraForegroundService::class.java).apply {
+                                    action = if (startService) 
+                                        com.example.data.MayeraForegroundService.ACTION_START 
+                                    else 
+                                        com.example.data.MayeraForegroundService.ACTION_STOP
+                                }
+                                if (startService) {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                        context.startForegroundService(intent)
+                                    } else {
+                                        context.startService(intent)
+                                    }
+                                } else {
+                                    context.startService(intent)
+                                }
+                                viewModel.checkOverlayPermission(context)
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = SunsetRed,
+                                checkedTrackColor = SunsetRed.copy(alpha = 0.3f)
+                            )
+                        )
+                    }
+                }
+            }
+
             // API key warning panel
             if (viewModel.isApiKeyMissing) {
                 Card(
@@ -195,7 +322,7 @@ fun AssistantScreen(
                                 color = SunsetRed
                             )
                             Text(
-                                text = "Set GEMINI_API_KEY in the AI Studio Secrets panel to connect to Maya's AI mind.",
+                                text = "Set GEMINI_API_KEY in the AI Studio Secrets panel to connect to Mayera's AI mind.",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -287,7 +414,7 @@ fun AssistantScreen(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = if (wakeWordModeEnabled) "Wake: 'Maya'" else "Wake: Off",
+                            text = if (wakeWordModeEnabled) "Wake: 'Mayera'" else "Wake: Off",
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -427,7 +554,7 @@ fun AiThinkingBubble() {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
-            text = "Maya is analyzing",
+            text = "Mayera is analyzing",
             fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.primary

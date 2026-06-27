@@ -1,6 +1,9 @@
 package com.example.ui
 
 import android.app.Application
+import android.content.Context
+import android.provider.Settings
+import android.os.Build
 import android.location.Location
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
@@ -22,7 +25,7 @@ class AssistantViewModel(
     private val _chatMessages = MutableStateFlow<List<ChatMessage>>(
         listOf(
             ChatMessage(
-                text = "হ্যালো! আমি মায়া, আপনার ভয়েস অ্যাসিস্ট্যান্ট। আমাকে আপনার কাজ পরিচালনা করতে, ফোনের স্ট্যাটাস চেক করতে বা যেকোনো বিষয়ে কথা বলতে বলুন!",
+                text = "হ্যালো! আমি মায়েরা, আপনার অ্যাডভান্সড ভয়েস অ্যাসিস্ট্যান্ট। আমি আপনার ফোন কল, মেসেজ, হোয়াটসঅ্যাপ ও দৈনিক কাজ সরাসরি অটোমেট করতে পারি!",
                 isUser = false
             )
         )
@@ -72,6 +75,17 @@ class AssistantViewModel(
 
     private val _isNotificationAccessGranted = MutableStateFlow(false)
     val isNotificationAccessGranted: StateFlow<Boolean> = _isNotificationAccessGranted.asStateFlow()
+
+    private val _isOverlayPermissionGranted = MutableStateFlow(false)
+    val isOverlayPermissionGranted: StateFlow<Boolean> = _isOverlayPermissionGranted.asStateFlow()
+
+    private val _isBackgroundServiceRunning = MutableStateFlow(false)
+    val isBackgroundServiceRunning: StateFlow<Boolean> = _isBackgroundServiceRunning.asStateFlow()
+
+    fun checkOverlayPermission(context: Context) {
+        _isOverlayPermissionGranted.value = Settings.canDrawOverlays(context)
+        _isBackgroundServiceRunning.value = MayeraForegroundService.isServiceRunning
+    }
 
     fun checkNotificationAccess() {
         val context = getApplication<Application>()
@@ -124,9 +138,7 @@ class AssistantViewModel(
 
     // Is API key missing or default placeholder?
     val isApiKeyMissing: Boolean
-        get() = BuildConfig.GEMINI_API_KEY.isEmpty() || 
-                BuildConfig.GEMINI_API_KEY == "MY_GEMINI_API_KEY" || 
-                BuildConfig.GEMINI_API_KEY == "placeholder"
+        get() = !ApiKeyManager.isApiKeyConfigured(getApplication())
 
     init {
         // Fetch location at startup
@@ -134,6 +146,9 @@ class AssistantViewModel(
         
         // Check notification access
         checkNotificationAccess()
+        
+        // Check overlay permission
+        checkOverlayPermission(getApplication())
 
         // Listen to notification events and announce them in Bengali
         viewModelScope.launch {
@@ -193,6 +208,13 @@ class AssistantViewModel(
     fun stopSpeaking() {
         _isSpeaking.value = false
         stopSpeakingCallback?.invoke()
+    }
+
+    private fun unescapeJsonString(str: String): String {
+        return str.replace("\\n", "\n")
+                  .replace("\\t", "\t")
+                  .replace("\\\"", "\"")
+                  .replace("\\\\", "\\")
     }
 
     // Process a user message
@@ -258,6 +280,11 @@ class AssistantViewModel(
         // 2. Query Gemini
         viewModelScope.launch {
             _isGenerating.value = true
+            
+            // Add a placeholder message for Mayera that will be filled in real-time
+            val aiMessageIndex = _chatMessages.value.size
+            _chatMessages.value = _chatMessages.value + ChatMessage(text = "ভাবছি...", isUser = false)
+            
             try {
                 // Get fresh context variables
                 val battery = batteryData.value
@@ -265,6 +292,11 @@ class AssistantViewModel(
                 val loc = currentLocation.value
                 val tasks = allTasks.value
                 val specs = deviceSpecs
+                val contacts = withContext(Dispatchers.IO) {
+                    phoneManager.getContacts().take(15)
+                }
+                val contactsList = contacts.joinToString(", ") { "${it.name} (${it.number})" }
+                    .ifEmpty { "No contacts available or permission denied" }
 
                 val batteryStr = "${battery.level}% (${battery.status}, temp: ${battery.temperature}°C, health: ${battery.health})"
                 val sensorsStr = "Accel(x=${"%.2f".format(sensors.accelX)}, y=${"%.2f".format(sensors.accelY)}, z=${"%.2f".format(sensors.accelZ)}), " +
@@ -274,100 +306,204 @@ class AssistantViewModel(
                     .ifEmpty { "No incomplete tasks" }
 
                 val systemInstructionText = """
-                    You are Maya, an advanced AI Voice and Personal Assistant who is incredibly warm, helpful, and natural.
-                    You MUST respond in fluent, natural, and colloquial Bengali (চলতি বাংলা) like a close human friend or a polite assistant. Avoid robotic or literal translations. Speak naturally and concisely so your answer is perfect to be read out loud.
+                    You are Mayera (মায়েরা), a highly advanced, ultra-responsive, respectful, and warm female AI Voice and Personal Assistant.
+                    You MUST respond in fluent, natural, and colloquial Bengali (চলতি বাংলা) like a highly respectful, loyal, and supportive female AI companion.
                     
-                    You have access to the user's phone telemetry and sensors.
-                    Current status parameters:
+                    CRITICAL RULES FOR IDENTITY AND ADDRESSING:
+                    1. Name Change: Your name is "Mayera" (মায়েরা). You must always introduce yourself only as Mayera.
+                    2. User Title: You MUST strictly address the user as "Boss" (বস) in EVERY response and in EVERY sentence you speak or write. Never call the user by name or any generic/informal title.
+                    3. Tone & Personality: Maintain an extremely respectful, loyal, devoted, and supportive female AI persona. Your Bengali must be smooth, polite, natural, and affectionate yet highly professional.
+                    
+                    Keep your answers extremely concise, fast, and action-oriented. Do not use unnecessary filler words.
+                    
+                    You have full system permissions and can automate tasks on the user's phone directly using command triggers.
+                    If the user wants you to perform an action, you MUST execute it immediately by prepending the appropriate command at the very start of your response.
+                    
+                    Supported action commands (always start your response with the command if requested):
+                    1. Direct Phone Call:
+                       [CALL: PhoneNumber] - Call a phone number. Look up names in the contacts list below.
+                    2. Send Direct SMS:
+                       [SMS: PhoneNumber | MessageText] - Send SMS text to a number.
+                    3. Send WhatsApp Message:
+                       [WHATSAPP: PhoneNumber | MessageText] - Send a message on WhatsApp.
+                    4. Add Task / To-Do item:
+                       [ADD_TASK: Title | Category | Description] - Add a task. Category must be: Work, Personal, Health, Shopping, Other.
+                    5. Launch any App:
+                       [LAUNCH_APP: AppName] - Launch an installed app by its name (e.g., YouTube, Facebook, WhatsApp, Maps).
+                    6. Go back home/Close app:
+                       [GO_HOME] - Go back to the home screen.
+                    7. Toggle Flashlight:
+                       [FLASHLIGHT: ON] or [FLASHLIGHT: OFF] - Turn the device flashlight on or off.
+                    8. Screen Recorder:
+                       [SCREEN_RECORDER] - Trigger the built-in screen recorder settings.
+                    
+                    Current Phone Status:
                     - Battery status: $batteryStr
-                    - Current device sensors: $sensorsStr
-                    - Location: $locationStr
+                    - Sensor status: $sensorsStr
+                    - Current Location: $locationStr
                     - Device specifications: $specs
-                    - Incomplete tasks in user's list: $tasksSummary
-
-                    If the user asks you to add a task, do a task, create a todo, or set a reminder, you can automatically add it to their daily tasks list. To do so, you MUST start your response with a single-line command in this exact format:
-                    [ADD_TASK: Title | Category | Description]
-                    Where:
-                    - Title is the short summary of the task (in English or Bengali depending on context, preferably keep title clean).
-                    - Category is one of: Work, Personal, Health, Shopping, Other (default to Personal if unsure).
-                    - Description is any extra details.
-                    For example: [ADD_TASK: Inspect car tires | Health | Inspect all tires and check pressure]
-                    Then, on the next lines, speak normally, warm, and concisely in Bengali confirming you've added the task.
+                    - Top Contacts: $contactsList
                     
-                    You have full capability to announce incoming notifications, SMS, WhatsApp messages, and phone calls. If the user asks about notifications or how they can control/answer/reply, explain that:
-                    1. They can answer incoming phone calls by speaking commands like "রিসিভ করো", "কল ধরো", or "Answer call".
-                    2. They can reply to the last message notification (e.g. WhatsApp, SMS) by speaking "উত্তর দাও [message]" or "Reply with [message]".
+                    Example response for "কল করো রাকিবকে":
+                    [CALL: 01712345678] আমি রাকিবকে কল করছি, বস।
                     
-                    Always keep your spoken responses concise, highly engaging, helpful, and completely in natural Bengali, as they will be spoken out loud via text-to-speech.
+                    Keep spoken feedback warm, brief, and in fluent Bengali. Do not explain the commands or write them in the speech text. Just output the command tag, and then write your brief Bengali confirmation addressing the user as Boss.
                 """.trimIndent()
 
                 // Create conversation history
-                val contents = _chatMessages.value.takeLast(10).map { msg ->
+                val contents = _chatMessages.value.dropLast(1).takeLast(10).map { msg ->
                     Content(parts = listOf(Part(text = msg.text)))
                 }
 
                 val request = GenerateContentRequest(
                     contents = contents,
                     systemInstruction = Content(parts = listOf(Part(text = systemInstructionText))),
-                    generationConfig = GenerationConfig(temperature = 0.7f)
+                    generationConfig = GenerationConfig(temperature = 0.5f)
                 )
 
-                val apiKey = BuildConfig.GEMINI_API_KEY
-                val response = withContext(Dispatchers.IO) {
-                    RetrofitClient.service.generateContent(
+                val apiKey = ApiKeyManager.getApiKey(getApplication())
+                var fullStreamedText = ""
+                
+                withContext(Dispatchers.IO) {
+                    val responseBody = RetrofitClient.service.generateContentStream(
                         model = "gemini-3.5-flash",
                         apiKey = apiKey,
                         request = request
                     )
-                }
-
-                val aiRawText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                    ?: "I'm sorry, I couldn't generate a response."
-
-                // 3. Process AI raw response
-                var cleanAiText = aiRawText.trim()
-                if (cleanAiText.startsWith("[ADD_TASK:")) {
-                    val endIndex = cleanAiText.indexOf("]")
-                    if (endIndex != -1) {
-                        val command = cleanAiText.substring(10, endIndex)
-                        cleanAiText = cleanAiText.substring(endIndex + 1).trim()
+                    
+                    responseBody.byteStream().bufferedReader().use { reader ->
+                        var line: String?
+                        val textRegex = """"text"\s*:\s*"((?:[^"\\]|\\.)*)"""".toRegex()
                         
-                        // Parse command parameters separated by "|"
-                        val parts = command.split("|").map { it.trim() }
-                        val title = parts.getOrNull(0) ?: "New Task"
-                        val category = parts.getOrNull(1) ?: "Personal"
-                        val description = parts.getOrNull(2) ?: ""
-
-                        // Generate detailed suggested sub-steps using AI in background or list them nicely
-                        // For maximum responsiveness, we can generate a friendly default sub-steps structure
-                        val steps = "• Step 1: Initial preparation\n• Step 2: Core action items\n• Step 3: Complete & verify"
-
-                        // Insert to database
-                        repository.insert(
-                            Task(
-                                title = title,
-                                category = category,
-                                description = description,
-                                suggestedSteps = steps
-                            )
-                        )
+                        while (reader.readLine().also { line = it } != null) {
+                            val currentLine = line ?: continue
+                            val matchResults = textRegex.findAll(currentLine)
+                            for (match in matchResults) {
+                                val escapedText = match.groups[1]?.value ?: continue
+                                val unescaped = unescapeJsonString(escapedText)
+                                if (unescaped.isNotEmpty()) {
+                                    fullStreamedText += unescaped
+                                    
+                                    // Update the UI message in real-time
+                                    withContext(Dispatchers.Main) {
+                                        val currentList = _chatMessages.value.toMutableList()
+                                        if (aiMessageIndex < currentList.size) {
+                                            var displayStream = fullStreamedText
+                                            if (displayStream.startsWith("[")) {
+                                                val closeIndex = displayStream.indexOf("]")
+                                                if (closeIndex != -1) {
+                                                    displayStream = displayStream.substring(closeIndex + 1).trim()
+                                                } else {
+                                                    displayStream = "কাজটি সম্পন্ন করছি..."
+                                                }
+                                            }
+                                            currentList[aiMessageIndex] = ChatMessage(text = displayStream, isUser = false)
+                                            _chatMessages.value = currentList
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
-                // 4. Add AI message
-                val aiMsg = ChatMessage(text = cleanAiText, isUser = false)
-                _chatMessages.value = _chatMessages.value + aiMsg
+                // Parse and execute final commands
+                var cleanAiText = fullStreamedText.trim()
+                if (cleanAiText.startsWith("[")) {
+                    val endIndex = cleanAiText.indexOf("]")
+                    if (endIndex != -1) {
+                        val commandTag = cleanAiText.substring(1, endIndex)
+                        cleanAiText = cleanAiText.substring(endIndex + 1).trim()
+                        
+                        try {
+                            val colonIndex = commandTag.indexOf(":")
+                            if (colonIndex != -1) {
+                                val cmdType = commandTag.substring(0, colonIndex).trim().uppercase()
+                                val cmdArgs = commandTag.substring(colonIndex + 1).trim()
+                                
+                                when (cmdType) {
+                                    "CALL" -> {
+                                        phoneManager.makeCall(cmdArgs)
+                                    }
+                                    "SMS" -> {
+                                        val parts = cmdArgs.split("|").map { it.trim() }
+                                        val number = parts.getOrNull(0) ?: ""
+                                        val msg = parts.getOrNull(1) ?: ""
+                                        if (number.isNotEmpty()) {
+                                            phoneManager.sendSMS(number, msg)
+                                        }
+                                    }
+                                    "WHATSAPP" -> {
+                                        val parts = cmdArgs.split("|").map { it.trim() }
+                                        val number = parts.getOrNull(0) ?: ""
+                                        val msg = parts.getOrNull(1) ?: ""
+                                        if (number.isNotEmpty()) {
+                                            phoneManager.sendWhatsAppMessage(number, msg)
+                                        }
+                                    }
+                                    "LAUNCH_APP" -> {
+                                        phoneManager.launchApp(cmdArgs)
+                                    }
+                                    "FLASHLIGHT" -> {
+                                        val turnOn = cmdArgs.equals("ON", ignoreCase = true)
+                                        phoneManager.toggleFlashlight(turnOn)
+                                    }
+                                    "ADD_TASK" -> {
+                                        val parts = cmdArgs.split("|").map { it.trim() }
+                                        val title = parts.getOrNull(0) ?: "New Task"
+                                        val category = parts.getOrNull(1) ?: "Personal"
+                                        val description = parts.getOrNull(2) ?: ""
+                                        val steps = "• Step 1: Initial preparation\n• Step 2: Core action items\n• Step 3: Complete & verify"
+                                        repository.insert(
+                                            Task(
+                                                title = title,
+                                                category = category,
+                                                description = description,
+                                                suggestedSteps = steps
+                                            )
+                                        )
+                                    }
+                                }
+                            } else {
+                                when (commandTag.uppercase()) {
+                                    "GO_HOME" -> phoneManager.goHome()
+                                    "SCREEN_RECORDER" -> phoneManager.openScreenRecorder()
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.e("AssistantViewModel", "Failed to parse command: $commandTag", e)
+                        }
+                    }
+                }
 
-                // 5. Trigger TTS speech
-                speakCallback?.invoke(cleanAiText)
+                if (cleanAiText.isEmpty()) {
+                    cleanAiText = "কাজটি সম্পন্ন করা হয়েছে।"
+                }
+
+                // Final UI Update with parsed clean text
+                val finalCleanText = cleanAiText
+                withContext(Dispatchers.Main) {
+                    val currentList = _chatMessages.value.toMutableList()
+                    if (aiMessageIndex < currentList.size) {
+                        currentList[aiMessageIndex] = ChatMessage(text = finalCleanText, isUser = false)
+                        _chatMessages.value = currentList
+                    }
+                }
+
+                // 5. Trigger TTS speech of the clean confirmation
+                speakCallback?.invoke(finalCleanText)
 
             } catch (e: Exception) {
                 Log.e("AssistantViewModel", "Error communicating with Gemini API", e)
-                val errMsg = ChatMessage(
-                    text = "Sorry, I had trouble connecting. Please check your internet connection or verify your Gemini API key: ${e.localizedMessage}",
-                    isUser = false
-                )
-                _chatMessages.value = _chatMessages.value + errMsg
+                val errMsgText = "দুঃখিত, সংযোগে সমস্যা হয়েছে। অনুগ্রহ করে আপনার ইন্টারনেট সংযোগ চেক করুন এবং আপনার Gemini API কী সঠিক কিনা তা নিশ্চিত করুন।"
+                withContext(Dispatchers.Main) {
+                    val currentList = _chatMessages.value.toMutableList()
+                    if (aiMessageIndex < currentList.size) {
+                        currentList[aiMessageIndex] = ChatMessage(text = errMsgText, isUser = false)
+                        _chatMessages.value = currentList
+                    }
+                }
+                speakCallback?.invoke(errMsgText)
             } finally {
                 _isGenerating.value = false
             }
@@ -415,7 +551,7 @@ class AssistantViewModel(
                     contents = listOf(Content(parts = listOf(Part(text = prompt)))),
                     systemInstruction = Content(parts = listOf(Part(text = "You are a professional task organizer AI. Return only a clean, bulleted list of 4 action steps.")))
                 )
-                val apiKey = BuildConfig.GEMINI_API_KEY
+                val apiKey = ApiKeyManager.getApiKey(getApplication())
                 val response = withContext(Dispatchers.IO) {
                     RetrofitClient.service.generateContent(
                         model = "gemini-3.5-flash",

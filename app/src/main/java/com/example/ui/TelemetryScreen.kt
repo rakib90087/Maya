@@ -324,7 +324,7 @@ fun TelemetryScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = "Maya needs permission to access contacts.",
+                            text = "Mayera needs permission to access contacts.",
                             fontSize = 12.sp,
                             textAlign = TextAlign.Center,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)

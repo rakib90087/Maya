@@ -45,7 +45,7 @@ class VoiceManager(private val context: Context) {
         }
 
         _isListening.value = true
-        _partialText.value = "Maya is listening..."
+        _partialText.value = "Mayera is listening..."
         
         setupSpeechRecognizer(isPassive = false)
 
@@ -60,7 +60,7 @@ class VoiceManager(private val context: Context) {
         }
 
         _isPassiveListening.value = true
-        _partialText.value = "Waiting for 'Maya'..."
+        _partialText.value = "Waiting for 'Mayera'..."
         
         setupSpeechRecognizer(isPassive = true)
 
@@ -87,7 +87,7 @@ class VoiceManager(private val context: Context) {
                         _isPassiveListening.value = true
                     } else {
                         _isListening.value = true
-                        _partialText.value = "Maya is listening..."
+                        _partialText.value = "Mayera is listening..."
                     }
                 }
 
@@ -149,7 +149,7 @@ class VoiceManager(private val context: Context) {
                                 Log.d("VoiceManager", "Wake word detected with query: $query")
                                 onWakeWordDetectedCallback?.invoke(query)
                             } else {
-                                // Restart passive listening if "Maya" was not found
+                                // Restart passive listening if "Mayera" was not found
                                 android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                                     if (!_isListening.value) {
                                         startPassiveListening()
@@ -200,7 +200,7 @@ class VoiceManager(private val context: Context) {
 
     private fun extractQuery(text: String): String? {
         val lowerText = text.lowercase().trim()
-        val wakeWords = listOf("maya", "মায়া", "মায়া")
+        val wakeWords = listOf("mayera", "maya", "মায়েরা", "মায়েরা", "মায়া", "মায়া")
         for (wakeWord in wakeWords) {
             val index = lowerText.indexOf(wakeWord)
             if (index != -1) {

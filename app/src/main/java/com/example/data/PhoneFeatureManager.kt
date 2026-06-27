@@ -233,4 +233,147 @@ class PhoneFeatureManager(private val context: Context) : SensorEventListener {
             "CPU ABI" to Build.SUPPORTED_ABIS.firstOrNull().toString()
         )
     }
+
+    // Direct Phone Call
+    fun makeCall(number: String) {
+        try {
+            val intent = Intent(Intent.ACTION_CALL).apply {
+                data = android.net.Uri.parse("tel:$number")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(intent)
+            Log.d("PhoneFeatureManager", "Making direct call to $number")
+        } catch (e: SecurityException) {
+            // Fallback to dialer if CALL_PHONE permission is not granted
+            val dialIntent = Intent(Intent.ACTION_DIAL).apply {
+                data = android.net.Uri.parse("tel:$number")
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(dialIntent)
+            Log.d("PhoneFeatureManager", "Falling back to dialer for $number")
+        } catch (e: Exception) {
+            Log.e("PhoneFeatureManager", "Failed to execute call", e)
+        }
+    }
+
+    // Direct SMS Sending
+    fun sendSMS(number: String, message: String) {
+        try {
+            val smsManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                context.getSystemService(android.telephony.SmsManager::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                android.telephony.SmsManager.getDefault()
+            }
+            smsManager.sendTextMessage(number, null, message, null, null)
+            Log.d("PhoneFeatureManager", "SMS sent directly to $number")
+        } catch (e: Exception) {
+            Log.e("PhoneFeatureManager", "SMS direct send failed. Falling back to Intent.", e)
+            try {
+                val smsIntent = Intent(Intent.ACTION_SENDTO).apply {
+                    data = android.net.Uri.parse("smsto:$number")
+                    putExtra("sms_body", message)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(smsIntent)
+            } catch (ex: Exception) {
+                Log.e("PhoneFeatureManager", "SMS fallback Intent failed", ex)
+            }
+        }
+    }
+
+    // WhatsApp Message Automation
+    fun sendWhatsAppMessage(number: String, message: String) {
+        try {
+            var cleanNumber = number.replace(Regex("[^0-9]"), "")
+            if (cleanNumber.length == 11 && cleanNumber.startsWith("0")) {
+                cleanNumber = "88$cleanNumber" // Bangladesh prefix
+            }
+            val uri = android.net.Uri.parse("https://api.whatsapp.com/send?phone=$cleanNumber&text=${android.net.Uri.encode(message)}")
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(intent)
+            Log.d("PhoneFeatureManager", "WhatsApp automation executed for $cleanNumber")
+        } catch (e: Exception) {
+            Log.e("PhoneFeatureManager", "WhatsApp failed", e)
+        }
+    }
+
+    // Launch Installed App
+    fun launchApp(appName: String): Boolean {
+        try {
+            val pm = context.packageManager
+            val packages = pm.getInstalledPackages(0)
+            for (pkg in packages) {
+                val label = pkg.applicationInfo?.loadLabel(pm)?.toString()?.lowercase() ?: ""
+                if (label.isNotEmpty() && (label.contains(appName.lowercase()) || appName.lowercase().contains(label))) {
+                    val launchIntent = pm.getLaunchIntentForPackage(pkg.packageName)
+                    if (launchIntent != null) {
+                        launchIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        context.startActivity(launchIntent)
+                        Log.d("PhoneFeatureManager", "Launched app: $label (${pkg.packageName})")
+                        return true
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("PhoneFeatureManager", "Launch app failed for $appName", e)
+        }
+        return false
+    }
+
+    // Go Home (Simulate closing app)
+    fun goHome() {
+        try {
+            val intent = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(intent)
+            Log.d("PhoneFeatureManager", "Going back home (simulating app close)")
+        } catch (e: Exception) {
+            Log.e("PhoneFeatureManager", "Failed to navigate home", e)
+        }
+    }
+
+    // Toggle Flashlight/Torch Utility
+    fun toggleFlashlight(turnOn: Boolean): Boolean {
+        return try {
+            val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as? android.hardware.camera2.CameraManager
+            val cameraId = cameraManager?.cameraIdList?.firstOrNull()
+            if (cameraId != null && cameraManager != null) {
+                cameraManager.setTorchMode(cameraId, turnOn)
+                Log.d("PhoneFeatureManager", "Flashlight state changed to: $turnOn")
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            Log.e("PhoneFeatureManager", "Failed to toggle flashlight", e)
+            false
+        }
+    }
+
+    // Open Screen Recorder Settings/Display Settings
+    fun openScreenRecorder() {
+        try {
+            val intent = Intent().apply {
+                action = "android.settings.SCREEN_RECORDING_SETTINGS"
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(intent)
+            Log.d("PhoneFeatureManager", "Opening screen recording settings")
+        } catch (e: Exception) {
+            try {
+                val displayIntent = Intent(android.provider.Settings.ACTION_DISPLAY_SETTINGS).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(displayIntent)
+                Log.d("PhoneFeatureManager", "Fallback: Opening display settings")
+            } catch (ex: Exception) {
+                Log.e("PhoneFeatureManager", "Failed to open display/recorder settings", ex)
+            }
+        }
+    }
 }

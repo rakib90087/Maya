@@ -1,5 +1,5 @@
 {
-  "name": "Maya Voice Assistant",
+  "name": "Mayera Voice Assistant",
   "description": "A smart voice-activated personal assistant that manages your daily tasks, accesses system telemetry, battery stats, and live device sensors.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
